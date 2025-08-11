@@ -8,7 +8,7 @@ Copy and paste these commands in order after completing the GitHub setup and Rai
 
 ## Your Generated JWT Secret
 ```bash
-export JWT_SECRET_KEY="c486900a8963b8eee0584ff803db8724232389cf480b33b6959c5feeb2ec6fee"
+export JWT_SECRET_KEY=""
 ```
 
 ## Railway Deployment Commands

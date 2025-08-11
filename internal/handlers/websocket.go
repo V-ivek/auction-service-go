@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 
+	"auction-microservice/internal/domain"
 	wsAdapter "auction-microservice/internal/adapters/websocket"
 	"auction-microservice/internal/ports"
 )
@@ -131,23 +132,44 @@ func (h *WebSocketHandler) handleClientMessages(client *wsAdapter.Client) {
 
 // ProcessBidMessage processes a bid message from WebSocket
 func (h *WebSocketHandler) ProcessBidMessage(ctx context.Context, client *wsAdapter.Client, data map[string]interface{}) {
+	h.logger.Info("🚀 ProcessBidMessage called",
+		zap.String("client_id", client.ID.String()),
+		zap.Any("data", data))
+
 	// Extract bid data
 	auctionIDStr, ok := data["auction_id"].(string)
 	if !ok {
+		h.logger.Error("❌ missing or invalid auction_id in bid data",
+			zap.String("client_id", client.ID.String()),
+			zap.Any("data", data))
 		h.sendError(client, "missing or invalid auction_id")
 		return
 	}
 
 	amountFloat, ok := data["amount"].(float64)
 	if !ok {
+		h.logger.Error("❌ missing or invalid amount in bid data",
+			zap.String("client_id", client.ID.String()),
+			zap.Any("data", data),
+			zap.Any("amount", data["amount"]))
 		h.sendError(client, "missing or invalid amount")
 		return
 	}
 	amount := int64(amountFloat)
 
+	h.logger.Info("📊 bid data extracted",
+		zap.String("client_id", client.ID.String()),
+		zap.String("auction_id", auctionIDStr),
+		zap.Int64("amount", amount),
+		zap.Float64("amount_float", amountFloat))
+
 	// Parse auction ID
 	auctionID, err := uuid.Parse(auctionIDStr)
 	if err != nil {
+		h.logger.Error("❌ invalid auction_id format",
+			zap.String("client_id", client.ID.String()),
+			zap.String("auction_id_str", auctionIDStr),
+			zap.Error(err))
 		h.sendError(client, "invalid auction_id format")
 		return
 	}
@@ -155,18 +177,39 @@ func (h *WebSocketHandler) ProcessBidMessage(ctx context.Context, client *wsAdap
 	// Get user ID
 	userID := client.GetUserID()
 	if userID == nil {
+		h.logger.Error("❌ user not authenticated",
+			zap.String("client_id", client.ID.String()))
 		h.sendError(client, "user not authenticated")
 		return
 	}
 
+	h.logger.Info("✅ proceeding with bid placement",
+		zap.String("client_id", client.ID.String()),
+		zap.String("user_id", userID.String()),
+		zap.String("auction_id", auctionID.String()),
+		zap.Int64("amount", amount))
+
 	// Place bid
 	bid, err := h.biddingService.PlaceBid(ctx, auctionID, *userID, amount)
 	if err != nil {
+		h.logger.Error("❌ failed to place bid",
+			zap.String("client_id", client.ID.String()),
+			zap.String("user_id", userID.String()),
+			zap.String("auction_id", auctionID.String()),
+			zap.Int64("amount", amount),
+			zap.Error(err))
 		h.sendError(client, "failed to place bid: "+err.Error())
 		return
 	}
 
-	// Send success response to client
+	h.logger.Info("🎉 bid placed successfully via websocket",
+		zap.String("client_id", client.ID.String()),
+		zap.String("user_id", userID.String()),
+		zap.String("auction_id", auctionID.String()),
+		zap.String("bid_id", bid.ID.String()),
+		zap.Int64("amount", amount))
+
+	// Send success response to the bidding client
 	client.SendMessage(wsAdapter.Message{
 		Type: "bid_placed_success",
 		Data: map[string]interface{}{
@@ -178,11 +221,13 @@ func (h *WebSocketHandler) ProcessBidMessage(ctx context.Context, client *wsAdap
 		Timestamp: bid.PlacedAt,
 	})
 
-	h.logger.Info("bid placed via websocket",
-		zap.String("client_id", client.ID.String()),
-		zap.String("user_id", userID.String()),
+	// 🚀 EVENT-DRIVEN: Broadcast bid update to ALL connected users
+	h.broadcastBidUpdate(auctionID, bid, *userID)
+
+	h.logger.Info("📢 bid update broadcasted to all users",
 		zap.String("auction_id", auctionID.String()),
-		zap.Int64("amount", amount))
+		zap.Int64("amount", amount),
+		zap.String("bidder_user_id", userID.String()))
 }
 
 // ProcessSubscriptionMessage processes a subscription message
@@ -229,7 +274,7 @@ func (h *WebSocketHandler) ProcessSubscriptionMessage(ctx context.Context, clien
 		return
 	}
 
-	// Send success response
+	// Send success response to client
 	client.SendMessage(wsAdapter.Message{
 		Type: responseType,
 		Data: map[string]interface{}{
@@ -239,6 +284,15 @@ func (h *WebSocketHandler) ProcessSubscriptionMessage(ctx context.Context, clien
 		},
 		Timestamp: h.getCurrentTime(),
 	})
+
+	// 🚀 EVENT-DRIVEN: Broadcast subscription update to all users
+	if messageType == "subscribe" {
+		h.BroadcastToAll("user_subscribed", map[string]interface{}{
+			"listing_id": listingID.String(),
+			"user_id":    userID.String(),
+			"timestamp":  h.getCurrentTime(),
+		})
+	}
 
 	h.logger.Info("subscription operation completed",
 		zap.String("client_id", client.ID.String()),
@@ -332,4 +386,37 @@ func (h *WebSocketHandler) GetActiveConnections() int {
 // GetAuctionRoomSize returns the number of clients in an auction room
 func (h *WebSocketHandler) GetAuctionRoomSize(auctionID uuid.UUID) int {
 	return h.hub.GetAuctionRoomSize(auctionID)
+}
+
+// broadcastBidUpdate broadcasts a bid update to all connected users (event-driven)
+func (h *WebSocketHandler) broadcastBidUpdate(auctionID uuid.UUID, bid *domain.Bid, bidderUserID uuid.UUID) {
+	// Get auction info to include in the broadcast
+	ctx := context.Background()
+	auction, err := h.auctionService.GetAuction(ctx, auctionID)
+	if err != nil {
+		h.logger.Error("failed to get auction for bid broadcast", 
+			zap.String("auction_id", auctionID.String()),
+			zap.Error(err))
+		return
+	}
+
+	// Create the bid update event data
+	bidUpdateData := map[string]interface{}{
+		"bid_id":         bid.ID.String(),
+		"auction_id":     auctionID.String(), 
+		"bidder_user_id": bidderUserID.String(),
+		"amount":         bid.Amount,
+		"timestamp":      bid.PlacedAt,
+		"current_bid":    auction.CurrentBid,
+		"bid_count":      auction.BidCount,
+	}
+
+	// 🚀 Broadcast to ALL connected users
+	h.BroadcastToAll("bid_placed", bidUpdateData)
+
+	h.logger.Debug("broadcasted bid update to all users",
+		zap.String("auction_id", auctionID.String()),
+		zap.String("bidder_user_id", bidderUserID.String()),
+		zap.Int64("amount", bid.Amount),
+		zap.Int("active_connections", h.GetActiveConnections()))
 }

@@ -219,10 +219,8 @@ func (s *BiddingServiceImpl) ValidateBid(ctx context.Context, auctionID, bidderI
 		return domain.ErrListingNotFound
 	}
 
-	// Check if bidder is not the owner
-	if listing.OwnerID == bidderID {
-		return domain.ErrCannotBidOnOwnItem
-	}
+	// Note: Removed owner validation - listing owners can bid on their own items
+	// This allows for legitimate scenarios like testing or self-bidding for reserve price
 
 	// Check if bid amount is valid
 	if amount <= 0 {

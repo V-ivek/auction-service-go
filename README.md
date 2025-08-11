@@ -14,12 +14,13 @@ A production-quality, real-time auction and bidding microservice built with Go, 
 - **Anti-Sniping Protection**: Automatic time extension for fair bidding (30-second rule)
 - **Concurrent Auctions**: Multiple auctions running simultaneously with independent timers
 - **Bid Validation**: Comprehensive validation with minimum bid increments and reserve prices
-- **User Authentication**: JWT-based authentication with session management
+- **User Authentication**: Simple token-based authentication for development
+- **Owner Bidding**: Listing owners can bid on their own items (useful for testing)
 
 ### ⚡ Technical Excellence
 - **Hexagonal Architecture**: Clean separation of concerns with ports & adapters pattern
 - **WebSocket Hub**: Scalable real-time communication with connection pooling
-- **Database Agnostic**: Support for PostgreSQL with in-memory fallback for development
+- **In-Memory Storage**: Fast development with mock repositories for testing
 - **Comprehensive Logging**: Structured logging with Uber's Zap
 - **Prometheus Metrics**: Production-ready monitoring and alerting
 - **Graceful Shutdown**: Clean resource management and connection handling
@@ -36,8 +37,7 @@ A production-quality, real-time auction and bidding microservice built with Go, 
 ### Backend
 - **Language**: Go 1.21+
 - **WebSocket**: Gorilla WebSocket for real-time communication
-- **Database**: PostgreSQL (production) / In-memory (development)
-- **Caching**: Redis for session storage and performance
+- **Storage**: In-memory repositories for development (easily swappable for PostgreSQL)
 - **Logging**: Uber Zap for structured logging
 - **Metrics**: Prometheus for monitoring and alerting
 - **Testing**: Built-in Go testing with >85% coverage
@@ -51,7 +51,7 @@ A production-quality, real-time auction and bidding microservice built with Go, 
 
 ### Infrastructure
 - **Containerization**: Docker with multi-stage builds
-- **Deployment**: Railway, AWS ECS, or Kubernetes
+- **Deployment**: Railway, AWS ECS, or Kubernetes ready
 - **Monitoring**: Prometheus + Grafana
 - **CI/CD**: GitHub Actions ready
 - **Documentation**: Comprehensive docs with architecture diagrams
@@ -90,11 +90,20 @@ A production-quality, real-time auction and bidding microservice built with Go, 
    go run cmd/frontend/main.go
    ```
    - Frontend: http://localhost:3000
+   - Serves static files from `web/` directory
+   - Includes CORS headers for development
 
 5. **Test the Application**
    ```bash
    curl http://localhost:8081/health
    ```
+
+### Sample Users
+The system comes with pre-configured sample users for testing:
+- **alice**: `1a2b3c4d-5e6f-4071-8a9b-0c1d2e3f4a5b`
+- **bob**: `2b3c4d5e-6f70-4182-9bac-1d2e3f4a5b6c`
+- **charlie**: `3c4d5e6f-7081-4293-abcd-2e3f4a5b6c7d`
+- **admin**: `4d5e6f70-8192-4b3c-bcde-3f4a5b6c7d8e`
 
 ### Using Docker
 
@@ -266,23 +275,31 @@ go tool cover -html=coverage.out
 
 ## 🗺 Roadmap
 
-### Phase 1 (Current)
+### Phase 1 (Completed ✅)
 - ✅ Core auction and bidding functionality
 - ✅ Real-time WebSocket communication
 - ✅ Web-based user interface
 - ✅ Basic authentication and security
+- ✅ Owner bidding support
+- ✅ Anti-sniping protection
+- ✅ Real-time activity feeds
+- ✅ Comprehensive bid validation
 
-### Phase 2 (Next)
+### Phase 2 (Next 🔄)
 - 🔄 Enhanced user profiles and authentication
 - 🔄 Advanced auction types (Dutch, sealed bid)
 - 🔄 Payment integration
 - 🔄 Email notifications
+- 🔄 PostgreSQL database integration
+- 🔄 User management dashboard
 
-### Phase 3 (Future)
+### Phase 3 (Future 📋)
 - 📋 Mobile applications (iOS/Android)
 - 📋 Advanced analytics and reporting
 - 📋 Multi-currency support
 - 📋 Integration APIs for third-party services
+- 📋 Advanced auction scheduling
+- 📋 Bulk listing management
 
 ## 🤝 Contributing
 
@@ -324,7 +341,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Gorilla WebSocket](https://github.com/gorilla/websocket): WebSocket implementation
 - [Uber Zap](https://github.com/uber-go/zap): High-performance logging
 - [Prometheus](https://prometheus.io/): Metrics collection
-- [PostgreSQL](https://www.postgresql.org/): Primary database
+- [Go UUID](https://github.com/google/uuid): UUID generation and validation
 
 ### Inspired By
 - Clean Architecture by Robert Martin

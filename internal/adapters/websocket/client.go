@@ -22,7 +22,7 @@ const (
 	pingPeriod = (pongWait * 9) / 10
 
 	// Maximum message size allowed from peer
-	maxMessageSize = 512
+	maxMessageSize = 2048 // Increased from 512 to 2048 bytes
 )
 
 var upgrader = websocket.Upgrader{
@@ -37,8 +37,12 @@ var upgrader = websocket.Upgrader{
 // Message represents a WebSocket message
 type Message struct {
 	Type      string      `json:"type"`
-	Data      interface{} `json:"data"`
-	Timestamp time.Time   `json:"timestamp"`
+    Data      interface{} `json:"data"`
+    // Accept any JSON type for inbound timestamps (number or string) to avoid
+    // strict decoding errors from clients that send epoch milliseconds.
+    // When sending messages, we continue providing time.Time which will marshal
+    // to RFC3339 strings for clients.
+    Timestamp interface{} `json:"timestamp,omitempty"`
 }
 
 // Client represents a WebSocket client
@@ -123,15 +127,18 @@ func (c *Client) ReadPump() {
 			var message Message
 			err := c.Conn.ReadJSON(&message)
 			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					c.logger.Error("websocket unexpected close error", zap.Error(err))
-				}
+				// Log ALL errors, not just unexpected ones
+				c.logger.Error("websocket read error", 
+					zap.String("client_id", c.ID.String()),
+					zap.Error(err),
+					zap.String("error_type", "ReadJSON"))
 				return
 			}
 
-			c.logger.Debug("received websocket message",
+			c.logger.Info("received websocket message",
 				zap.String("client_id", c.ID.String()),
-				zap.String("message_type", message.Type))
+				zap.String("message_type", message.Type),
+				zap.Any("message_data", message.Data))
 
 			// Handle different message types
 			c.handleMessage(message)
@@ -180,17 +187,34 @@ func (c *Client) WritePump() {
 
 // handleMessage handles incoming WebSocket messages
 func (c *Client) handleMessage(message Message) {
+	c.logger.Info("handling websocket message",
+		zap.String("client_id", c.ID.String()),
+		zap.String("message_type", message.Type))
+		
 	switch message.Type {
+  case "ping":
+      // Respond to client heartbeats
+      c.Send <- Message{
+          Type:      "pong",
+          Data:      map[string]interface{}{},
+          Timestamp: time.Now(),
+      }
 	case "join_auction":
 		c.handleJoinAuction(message)
 	case "leave_auction":
 		c.handleLeaveAuction(message)
 	case "place_bid":
 		c.handlePlaceBid(message)
+  case "subscribe", "unsubscribe":
+      // Forward subscription messages to hub for processing by the WebSocket handler
+      c.Hub.ProcessClientMessage <- &ClientMessage{
+          Client:  c,
+          Message: message,
+      }
 	case "authenticate":
 		c.handleAuthenticate(message)
 	default:
-		c.logger.Debug("unknown message type",
+		c.logger.Warn("unknown message type",
 			zap.String("client_id", c.ID.String()),
 			zap.String("message_type", message.Type))
 	}
@@ -258,29 +282,55 @@ func (c *Client) handleLeaveAuction(message Message) {
 
 // handlePlaceBid handles placing a bid
 func (c *Client) handlePlaceBid(message Message) {
-	// This would typically forward the bid to the bidding service
-	// For now, just log it
-	c.logger.Debug("bid message received",
+	c.logger.Info("bid message received, forwarding to hub",
 		zap.String("client_id", c.ID.String()),
-		zap.Any("data", message.Data))
+		zap.Any("data", message.Data),
+		zap.String("message_type", message.Type))
+	
+	// Forward to hub for processing by WebSocket handler
+	select {
+	case c.Hub.ProcessClientMessage <- &ClientMessage{
+		Client:  c,
+		Message: message,
+	}:
+		c.logger.Info("bid message successfully queued to hub",
+			zap.String("client_id", c.ID.String()))
+	default:
+		c.logger.Error("failed to queue bid message to hub - channel full",
+			zap.String("client_id", c.ID.String()))
+		c.sendError("server busy, please try again")
+	}
 }
 
 // handleAuthenticate handles client authentication
 func (c *Client) handleAuthenticate(message Message) {
+	c.logger.Info("processing authentication message",
+		zap.String("client_id", c.ID.String()),
+		zap.Any("message_data", message.Data))
+		
 	data, ok := message.Data.(map[string]interface{})
 	if !ok {
+		c.logger.Warn("invalid message data format for authentication",
+			zap.String("client_id", c.ID.String()))
 		c.sendError("invalid message data")
 		return
 	}
 
 	userIDStr, ok := data["user_id"].(string)
 	if !ok {
+		c.logger.Warn("missing or invalid user_id in authentication message",
+			zap.String("client_id", c.ID.String()),
+			zap.Any("user_id", data["user_id"]))
 		c.sendError("missing or invalid user_id")
 		return
 	}
 
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
+		c.logger.Warn("invalid user_id format",
+			zap.String("client_id", c.ID.String()),
+			zap.String("user_id_str", userIDStr),
+			zap.Error(err))
 		c.sendError("invalid user_id format")
 		return
 	}
@@ -297,13 +347,17 @@ func (c *Client) handleAuthenticate(message Message) {
 		Timestamp: time.Now(),
 	}
 
-	c.logger.Info("client authenticated",
+	c.logger.Info("client authenticated successfully",
 		zap.String("client_id", c.ID.String()),
 		zap.String("user_id", userID.String()))
 }
 
 // sendError sends an error message to the client
 func (c *Client) sendError(errorMsg string) {
+	c.logger.Warn("sending error to client",
+		zap.String("client_id", c.ID.String()),
+		zap.String("error_message", errorMsg))
+		
 	select {
 	case c.Send <- Message{
 		Type: "error",
@@ -313,8 +367,10 @@ func (c *Client) sendError(errorMsg string) {
 		Timestamp: time.Now(),
 	}:
 	default:
-		// Channel is full, close the client
-		close(c.Send)
+		// Channel is full, log but don't close connection immediately
+		c.logger.Warn("client send channel full, message dropped",
+			zap.String("client_id", c.ID.String()),
+			zap.String("error_message", errorMsg))
 	}
 }
 

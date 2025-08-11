@@ -49,8 +49,12 @@ type Hub struct {
 	// Send message to specific user
 	SendToUser chan *UserMessage
 
+	// Process client messages
+	ProcessClientMessage chan *ClientMessage
+
 	logger             *zap.Logger
 	subscriptionRepo   ports.SubscriptionRepository
+	wsHandler          WebSocketMessageHandler
 	mu                 sync.RWMutex
 	ctx                context.Context
 	cancel             context.CancelFunc
@@ -63,26 +67,44 @@ type UserMessage struct {
 	Message Message
 }
 
+// ClientMessage represents a message from a client that needs processing
+type ClientMessage struct {
+	Client  *Client
+	Message Message
+}
+
+// WebSocketMessageHandler interface for handling WebSocket messages
+type WebSocketMessageHandler interface {
+	ProcessBidMessage(ctx context.Context, client *Client, data map[string]interface{})
+	ProcessSubscriptionMessage(ctx context.Context, client *Client, messageType string, data map[string]interface{})
+}
+
 // NewHub creates a new Hub
 func NewHub(logger *zap.Logger, subscriptionRepo ports.SubscriptionRepository) *Hub {
 	ctx, cancel := context.WithCancel(context.Background())
 	
 	return &Hub{
-		clients:            make(map[*Client]bool),
-		auctionRooms:       make(map[uuid.UUID]map[*Client]bool),
-		userConnections:    make(map[uuid.UUID]map[*Client]bool),
-		Broadcast:          make(chan Message),
-		Register:           make(chan *Client),
-		Unregister:         make(chan *Client),
-		JoinAuction:        make(chan *AuctionMessage),
-		LeaveAuction:       make(chan *AuctionMessage),
-		SendToAuction:      make(chan *AuctionMessage),
-		SendToUser:         make(chan *UserMessage),
-		logger:             logger,
-		subscriptionRepo:   subscriptionRepo,
-		ctx:                ctx,
-		cancel:             cancel,
+		clients:              make(map[*Client]bool),
+		auctionRooms:         make(map[uuid.UUID]map[*Client]bool),
+		userConnections:      make(map[uuid.UUID]map[*Client]bool),
+		Broadcast:            make(chan Message, 100),
+		Register:             make(chan *Client, 10),
+		Unregister:           make(chan *Client, 10),
+		JoinAuction:          make(chan *AuctionMessage, 10),
+		LeaveAuction:         make(chan *AuctionMessage, 10),
+		SendToAuction:        make(chan *AuctionMessage, 10),
+		SendToUser:           make(chan *UserMessage, 10),
+		ProcessClientMessage: make(chan *ClientMessage, 100),
+		logger:               logger,
+		subscriptionRepo:     subscriptionRepo,
+		ctx:                  ctx,
+		cancel:               cancel,
 	}
+}
+
+// SetMessageHandler sets the WebSocket message handler
+func (h *Hub) SetMessageHandler(handler WebSocketMessageHandler) {
+	h.wsHandler = handler
 }
 
 // Run starts the hub and processes messages
@@ -117,6 +139,12 @@ func (h *Hub) Run(ctx context.Context) {
 
 		case userMsg := <-h.SendToUser:
 			h.sendToUser(userMsg)
+
+		case clientMsg := <-h.ProcessClientMessage:
+			h.logger.Info("received client message in hub main loop",
+				zap.String("client_id", clientMsg.Client.ID.String()),
+				zap.String("message_type", clientMsg.Message.Type))
+			h.processClientMessage(clientMsg)
 		}
 	}
 }
@@ -423,4 +451,57 @@ func (h *Hub) Stop() {
 	}
 
 	h.logger.Info("websocket hub stopped")
+}
+
+// processClientMessage processes messages from clients
+func (h *Hub) processClientMessage(clientMsg *ClientMessage) {
+	if h.wsHandler == nil {
+		h.logger.Warn("no WebSocket message handler set")
+		return
+	}
+
+	client := clientMsg.Client
+	message := clientMsg.Message
+
+	h.logger.Info("processing client message in hub",
+		zap.String("client_id", client.ID.String()),
+		zap.String("message_type", message.Type),
+		zap.Any("message_data", message.Data))
+
+	data, ok := message.Data.(map[string]interface{})
+	if !ok {
+		h.logger.Error("invalid message data format",
+			zap.String("client_id", client.ID.String()),
+			zap.String("message_type", message.Type),
+			zap.Any("message_data", message.Data))
+		client.SendMessage(Message{
+			Type: "error",
+			Data: map[string]interface{}{
+				"message": "invalid message data format",
+			},
+			Timestamp: time.Now(),
+		})
+		return
+	}
+
+	ctx := context.Background()
+
+	switch message.Type {
+	case "place_bid":
+		h.logger.Info("processing place_bid message",
+			zap.String("client_id", client.ID.String()),
+			zap.String("auction_id", data["auction_id"].(string)),
+			zap.Any("amount", data["amount"]))
+		h.wsHandler.ProcessBidMessage(ctx, client, data)
+	case "subscribe", "unsubscribe":
+		h.logger.Info("processing subscription message",
+			zap.String("client_id", client.ID.String()),
+			zap.String("message_type", message.Type),
+			zap.String("listing_id", data["listing_id"].(string)))
+		h.wsHandler.ProcessSubscriptionMessage(ctx, client, message.Type, data)
+	default:
+		h.logger.Debug("unhandled message type",
+			zap.String("client_id", client.ID.String()),
+			zap.String("message_type", message.Type))
+	}
 }

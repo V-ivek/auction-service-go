@@ -28,6 +28,7 @@ import (
 	"auction-microservice/pkg/middleware"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -105,6 +106,9 @@ func main() {
 	wsHandler := handlers.NewWebSocketHandler(
 		hub, biddingService, subscriptionService, auctionService, auth, logger,
 	)
+
+	// Connect WebSocket handler to hub for message processing
+	hub.SetMessageHandler(wsHandler)
 
 	// Setup HTTP server
 	mux := http.NewServeMux()
@@ -290,19 +294,32 @@ func main() {
 func setupSampleData(userRepo *services.MockUserRepository, listingRepo *services.MockListingRepository, auctionRepo *services.MockAuctionRepository, logger *zap.Logger) {
 	ctx := context.Background()
 
-	// Create sample users
+	// Create sample users with FIXED UUIDs to match frontend
 	alice := domain.NewUser("alice", "alice@example.com")
-	bob := domain.NewUser("bob", "bob@example.com")
+	BobUser := domain.NewUser("bob", "bob@example.com")
 	charlie := domain.NewUser("charlie", "charlie@example.com")
+	admin := domain.NewUser("admin", "admin@example.com")
+
+	// Assign deterministic IDs matching web/js/app.js sampleUsers
+	alice.ID = uuid.MustParse("1a2b3c4d-5e6f-4071-8a9b-0c1d2e3f4a5b")
+	BobUser.ID = uuid.MustParse("2b3c4d5e-6f70-4182-9bac-1d2e3f4a5b6c")
+	charlie.ID = uuid.MustParse("3c4d5e6f-7081-4293-abcd-2e3f4a5b6c7d")
+	admin.ID = uuid.MustParse("4d5e6f70-8192-4b3c-bcde-3f4a5b6c7d8e")
 
 	userRepo.Create(ctx, alice)
-	userRepo.Create(ctx, bob)
+	userRepo.Create(ctx, BobUser)
 	userRepo.Create(ctx, charlie)
+	userRepo.Create(ctx, admin)
 
 	// Create sample listings
 	watch := domain.NewListing("Vintage Watch", "A beautiful vintage watch from the 1960s", 10000, 15000, alice.ID)
-	car := domain.NewListing("Classic Car", "Well-maintained 1967 Mustang", 2500000, 3000000, bob.ID)
+	car := domain.NewListing("Classic Car", "Well-maintained 1967 Mustang", 2500000, 3000000, BobUser.ID)
 	painting := domain.NewListing("Art Painting", "Original oil painting by local artist", 50000, 75000, charlie.ID)
+
+	// Activate listings before creating auctions
+	watch.Activate()
+	car.Activate()
+	painting.Activate()
 
 	listingRepo.Create(ctx, watch)
 	listingRepo.Create(ctx, car)
