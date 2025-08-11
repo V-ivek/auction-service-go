@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Auction Platform</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="container">
+                <div class="header-content">
+                    <h1 class="logo">🏆 Auction Platform</h1>
+                    <div class="connection-status">
+                        <span id="connectionStatus" class="status-dot offline"></span>
+                        <span id="connectionText">Connecting...</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <div class="container">
+                <!-- Authentication Section -->
+                <section id="authSection" class="auth-section">
+                    <div class="auth-card">
+                        <h2>Join the Auction</h2>
+                        <form id="loginForm">
+                            <div class="form-group">
+                                <label for="username">Username:</label>
+                                <input type="text" id="username" name="username" required 
+                                       placeholder="Enter your username" autocomplete="username">
+                            </div>
+                            <button type="submit" class="btn btn-primary">Enter Auction</button>
+                        </form>
+                    </div>
+                </section>
+
+                <!-- Auction Dashboard -->
+                <section id="dashboardSection" class="dashboard hidden">
+                    <!-- User Info -->
+                    <div class="user-info">
+                        <h2>Welcome, <span id="currentUser"></span>!</h2>
+                        <button id="logoutBtn" class="btn btn-secondary">Logout</button>
+                    </div>
+
+                    <!-- Active Auctions -->
+                    <div class="auctions-grid">
+                        <h3>Active Auctions</h3>
+                        <div id="auctionsList" class="auctions-list">
+                            <!-- Auctions will be populated here -->
+                        </div>
+                    </div>
+
+                    <!-- Auction Details Modal -->
+                    <div id="auctionModal" class="modal">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h2 id="modalTitle">Auction Details</h2>
+                                <button id="closeModal" class="close-btn">&times;</button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="auction-info">
+                                    <div class="auction-image">
+                                        <div class="placeholder-image">📦</div>
+                                    </div>
+                                    <div class="auction-details">
+                                        <h3 id="auctionTitle">Item Title</h3>
+                                        <p id="auctionDescription">Item description...</p>
+                                        <div class="price-info">
+                                            <div class="current-price">
+                                                <span class="label">Current Bid:</span>
+                                                <span id="currentBid" class="price">$0</span>
+                                            </div>
+                                            <div class="reserve-price">
+                                                <span class="label">Reserve Price:</span>
+                                                <span id="reservePrice" class="price">$0</span>
+                                            </div>
+                                        </div>
+                                        <div class="auction-meta">
+                                            <div class="time-left">
+                                                <span class="label">Time Remaining:</span>
+                                                <span id="timeRemaining" class="time">--:--:--</span>
+                                            </div>
+                                            <div class="bid-count">
+                                                <span class="label">Total Bids:</span>
+                                                <span id="bidCount">0</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Bidding Section -->
+                                <div class="bidding-section">
+                                    <form id="bidForm">
+                                        <div class="bid-input-group">
+                                            <input type="number" id="bidAmount" placeholder="Enter your bid" 
+                                                   step="0.01" min="0" required>
+                                            <button type="submit" class="btn btn-primary">Place Bid</button>
+                                        </div>
+                                    </form>
+                                    <div id="bidMessage" class="message"></div>
+                                </div>
+
+                                <!-- Recent Bids -->
+                                <div class="recent-bids">
+                                    <h4>Recent Bids</h4>
+                                    <div id="bidsList" class="bids-list">
+                                        <div class="no-bids">No bids yet. Be the first!</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Activity Feed -->
+                    <div class="activity-section">
+                        <h3>Live Activity Feed</h3>
+                        <div id="activityFeed" class="activity-feed">
+                            <div class="activity-item system">
+                                <span class="timestamp"></span>
+                                <span class="message">Connected to auction platform</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <!-- Toast Notifications -->
+        <div id="toastContainer" class="toast-container"></div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
